@@ -70,7 +70,7 @@ public class TopologyMetricsRunnable extends Thread {
     protected final ConcurrentMap<String, TopologyMetricContext> topologyMetricContexts =
             new ConcurrentHashMap<>();
 
-    protected final BlockingDeque<Event> queue = new LinkedBlockingDeque<>();
+    protected final BlockingDeque<TopologyMetricsRunnable.Event> queue = new LinkedBlockingDeque<>();
 
     private static final String PENDING_UPLOAD_METRIC_DATA = "__pending.upload.metrics__";
     private static final String PENDING_UPLOAD_METRIC_DATA_INFO = "__pending.upload.metrics.info__";
@@ -241,7 +241,7 @@ public class TopologyMetricsRunnable extends Thread {
 
     @Override
     public void run() {
-        while (!isShutdown.get()) {
+        while (isShutdown != null && !isShutdown.get()) {
             if (localMode) {
                 return;
             }
@@ -249,7 +249,7 @@ public class TopologyMetricsRunnable extends Thread {
             try {
                 // wait for metricUploader to be ready, for some external plugin like database, it'll take a few seconds
                 if (this.metricUploader != null) {
-                    Event event = queue.poll();
+                    Event event = queue.poll(1,TimeUnit.MILLISECONDS);
                     if (event == null) {
                         continue;
                     }
@@ -478,16 +478,18 @@ public class TopologyMetricsRunnable extends Thread {
     private void syncMetaFromRemote(String topologyId, TopologyMetricContext context) {
         try {
             int memSize = context.getMemMeta().size();
-            int zkSize = (Integer) stormClusterState.get_topology_metric(topologyId);
+            Integer zkSize = (Integer) stormClusterState.get_topology_metric(topologyId);
 
-            if (memSize != zkSize) {
+            if (zkSize != null && memSize != zkSize.intValue()) {
                 ConcurrentMap<String, Long> memMeta = context.getMemMeta();
                 for (MetaType metaType : MetaType.values()) {
                     List<MetricMeta> metaList = metricQueryClient.getMetricMeta(clusterName, topologyId, metaType);
-                    LOG.info("get remote metric meta, topology:{}, metaType:{}, mem:{}, zk:{}, new size:{}",
-                            topologyId, metaType, memSize, zkSize, metaList.size());
-                    for (MetricMeta meta : metaList) {
-                        memMeta.putIfAbsent(meta.getFQN(), meta.getId());
+                    if (metaList != null) {
+                        LOG.info("get remote metric meta, topology:{}, metaType:{}, mem:{}, zk:{}, new size:{}",
+                                topologyId, metaType, memSize, zkSize, metaList.size());
+                        for (MetricMeta meta : metaList) {
+                            memMeta.putIfAbsent(meta.getFQN(), meta.getId());
+                        }
                     }
                 }
                 metricCache.putMeta(topologyId, memMeta);
@@ -736,7 +738,7 @@ public class TopologyMetricsRunnable extends Thread {
     class RefreshTopologiesThread extends RunnableCallback {
         @Override
         public void run() {
-            if (!isShutdown.get()) {
+            if (isShutdown != null && !isShutdown.get()) {
                 pushEvent(new Refresh());
             }
         }
@@ -759,7 +761,7 @@ public class TopologyMetricsRunnable extends Thread {
 
         @Override
         public void run() {
-            while (!isShutdown.get()) {
+            while (isShutdown != null && !isShutdown.get()) {
                 try {
                     if (metricUploader != null && nimbusData.isLeader()) {
                         final int idx = getFirstPendingUploadIndex();
@@ -802,7 +804,7 @@ public class TopologyMetricsRunnable extends Thread {
 
         @Override
         public void run() {
-            while (!isShutdown.get()) {
+            while (isShutdown != null && !isShutdown.get()) {
                 long start = System.currentTimeMillis();
                 try {
                     // if metricUploader is not fully initialized, return directly
