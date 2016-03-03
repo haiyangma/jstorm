@@ -25,6 +25,7 @@ import backtype.storm.serialization.DefaultSerializationDelegate;
 import backtype.storm.serialization.SerializationDelegate;
 import clojure.lang.IFn;
 import clojure.lang.RT;
+import com.alibaba.jstorm.client.ConfigExtension;
 import com.alibaba.jstorm.utils.LoadConf;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -43,7 +44,6 @@ import org.yaml.snakeyaml.Yaml;
 
 import java.io.*;
 import java.lang.reflect.Constructor;
-import java.net.URL;
 import java.net.URLClassLoader;
 import java.net.URLDecoder;
 import java.nio.ByteBuffer;
@@ -261,28 +261,6 @@ public class Utils {
         }
     }
 
-    /**
-     * Please directly use LoadConf.findResources(name);
-     * 
-     * @param name
-     * @return
-     */
-    @Deprecated
-    public static List<URL> findResources(String name) {
-        return LoadConf.findResources(name);
-    }
-
-    /**
-     * Please directly use LoadConf.findAndReadYaml(name);
-     * 
-     * @param name
-     * @return
-     */
-    @Deprecated
-    public static Map findAndReadConfigFile(String name, boolean mustExist) {
-        return LoadConf.findAndReadYaml(name, mustExist, false);
-    }
-
     public static Map findAndReadConfigFile(String name) {
         return LoadConf.findAndReadYaml(name, true, false);
     }
@@ -307,6 +285,17 @@ public class Utils {
                     ret.put(options[0], val);
                 }
             }
+        }
+        
+        String excludeJars = System.getProperty("exclude.jars");
+        if (excludeJars != null) {
+        	ret.put("exclude.jars", excludeJars);
+        }
+
+        String tridentOptions = System.getProperty("trident.batch.option");
+        if (tridentOptions != null && tridentOptions.equals("off")) {
+            ConfigExtension.setTaskBatchTuple(ret, false);
+            System.setProperty("trident.batch.option", "");
         }
         return ret;
     }
@@ -344,7 +333,7 @@ public class Utils {
     public static Map loadDefinedConf(String confFile) {
         File file = new File(confFile);
         if (file.exists() == false) {
-            return findAndReadConfigFile(confFile, true);
+            return LoadConf.findAndReadYaml(confFile, true, false);
         }
 
         Yaml yaml = new Yaml();
@@ -365,7 +354,7 @@ public class Utils {
         String confFile = System.getProperty("storm.conf.file");
         Map storm;
         if (StringUtils.isBlank(confFile) == true) {
-            storm = findAndReadConfigFile("storm.yaml", false);
+            storm = LoadConf.findAndReadYaml("storm.yaml", false, false);
         } else {
             storm = loadDefinedConf(confFile);
         }
@@ -713,7 +702,7 @@ public class Utils {
 
     public static List<String> tokenize_path(String path) {
         String[] toks = path.split("/");
-        ArrayList<String> rtn = new ArrayList<String>();
+        java.util.ArrayList<String> rtn = new ArrayList<String>();
         for (String str : toks) {
             if (!str.isEmpty()) {
                 rtn.add(str);
@@ -779,9 +768,9 @@ public class Utils {
     private static Map loadYaml(String confPath) {
         Map ret = new HashMap<Object, Object>();
         Yaml yaml = new Yaml();
-
+        InputStream stream = null;
         try {
-            InputStream stream = new FileInputStream(confPath);
+            stream = new FileInputStream(confPath);
             ret = (Map) yaml.load(stream);
             if (ret == null || ret.isEmpty() == true) {
                 System.out.println("WARN: Config file is empty");
@@ -793,6 +782,14 @@ public class Utils {
         } catch (Exception e1) {
             e1.printStackTrace();
             throw new RuntimeException("Failed to read config file");
+        }finally {
+            if (stream != null){
+                try {
+                    stream.close();
+                }catch (Exception e){
+                    e.printStackTrace();
+                }
+            }
         }
 
         return ret;
